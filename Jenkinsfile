@@ -44,7 +44,9 @@ pipeline {
     
     post {
         always {
-            cleanWs()
+            node {          // <-- wrap inside node for workspace access
+                cleanWs()   // safely cleans workspace
+            }
         }
         success {
             echo 'Pipeline completed successfully!'
