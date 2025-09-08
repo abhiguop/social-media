@@ -21,8 +21,6 @@ pipeline {
             }
         }
         
-        // Optional: add tests when available
-        
         stage('Push to Docker Hub') {
             steps {
                 script {
@@ -44,9 +42,7 @@ pipeline {
     
     post {
         always {
-            node {          // <-- wrap inside node for workspace access
-                cleanWs()   // safely cleans workspace
-            }
+            deleteDir() // safer than cleanWs() in Declarative pipelines
         }
         success {
             echo 'Pipeline completed successfully!'
