@@ -9,7 +9,18 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],  // use the actual branch
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/abhiguop/social-media',
+                            // credentialsId: 'github-credentials' // uncomment if private repo
+                        ]]
+                    ])
+                }
             }
         }
         
@@ -42,7 +53,7 @@ pipeline {
     
     post {
         always {
-            deleteDir() // safer than cleanWs() in Declarative pipelines
+            deleteDir() // ensures workspace cleanup
         }
         success {
             echo 'Pipeline completed successfully!'
