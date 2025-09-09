@@ -9,6 +9,10 @@
         booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'If true, logs into Docker Hub and pushes built images. Leave false if credentials are not configured yet.')
     }
     
+    options {
+        skipDefaultCheckout(true) // avoid duplicate implicit checkout
+    }
+    
     stages {
         stage('Checkout') {
             steps {
@@ -27,13 +31,26 @@
             }
         }
         
-        stage('Verify Docker') {
+        stage('Check Docker') {
             steps {
                 script {
+                    def status
                     if (isUnix()) {
-                        sh 'docker version'
+                        status = sh(label: 'Check docker availability', script: 'command -v docker >/dev/null 2>&1', returnStatus: true)
                     } else {
-                        powershell 'docker version'
+                        status = powershell(label: 'Check docker availability', returnStatus: true, script: 'if (Get-Command docker -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }')
+                    }
+                    if (status == 0) {
+                        env.DOCKER_AVAILABLE = 'true'
+                        echo 'Docker is available on this agent.'
+                        if (isUnix()) {
+                            sh 'docker version || true'
+                        } else {
+                            powershell 'docker version'
+                        }
+                    } else {
+                        env.DOCKER_AVAILABLE = 'false'
+                        echo 'Docker is NOT available on this agent. Docker-related stages will be skipped.'
                     }
                 }
             }
@@ -41,7 +58,10 @@
         
         stage('Docker Hub Login') {
             when {
-                expression { return params.PUBLISH_IMAGES }
+                allOf {
+                    expression { return env.DOCKER_AVAILABLE == 'true' }
+                    expression { return params.PUBLISH_IMAGES }
+                }
             }
             steps {
                 script {
@@ -62,6 +82,9 @@
         }
 
         stage('Build Docker Image') {
+            when {
+                expression { return env.DOCKER_AVAILABLE == 'true' }
+            }
             steps {
                 script {
                     if (isUnix()) {
@@ -81,7 +104,10 @@
         
         stage('Push to Docker Hub') {
             when {
-                expression { return params.PUBLISH_IMAGES }
+                allOf {
+                    expression { return env.DOCKER_AVAILABLE == 'true' }
+                    expression { return params.PUBLISH_IMAGES }
+                }
             }
             steps {
                 script {
@@ -103,6 +129,9 @@
         }
         
         stage('Deploy') {
+            when {
+                expression { return env.DOCKER_AVAILABLE == 'true' }
+            }
             steps {
                 script {
                     if (isUnix()) {
