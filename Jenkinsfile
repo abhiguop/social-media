@@ -1,56 +1,45 @@
-  pipeline {
+pipeline {
     agent any
     
     environment {
         IMAGE_NAME = 'abhigyop/social-media-backend'
+        DOCKER_HOST = 'tcp://docker-dind:2375'   // Use DinD
     }
     
     parameters {
-        booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'If true, logs into Docker Hub and pushes built images. Leave false if credentials are not configured yet.')
+        booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'Push Docker images to Docker Hub')
     }
     
     options {
-        skipDefaultCheckout(true) // avoid duplicate implicit checkout
+        skipDefaultCheckout(true)
     }
     
     stages {
         stage('Checkout') {
             steps {
-                script {
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: '*/main']],  // use the actual branch
-                        doGenerateSubmoduleConfigurations: false,
-                        extensions: [],
-                        userRemoteConfigs: [[
-                            url: 'https://github.com/abhiguop/social-media',
-                            // credentialsId: 'github-credentials' // uncomment if private repo
-                        ]]
-                    ])
-                }
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/abhiguop/social-media',
+                        // credentialsId: 'github-credentials'
+                    ]]
+                ])
             }
         }
         
         stage('Check Docker') {
             steps {
                 script {
-                    def status
-                    if (isUnix()) {
-                        status = sh(label: 'Check docker availability', script: 'command -v docker >/dev/null 2>&1', returnStatus: true)
-                    } else {
-                        status = powershell(label: 'Check docker availability', returnStatus: true, script: 'if (Get-Command docker -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }')
-                    }
+                    def status = sh(script: 'docker version', returnStatus: true)
                     if (status == 0) {
                         env.DOCKER_AVAILABLE = 'true'
-                        echo 'Docker is available on this agent.'
-                        if (isUnix()) {
-                            sh 'docker version || true'
-                        } else {
-                            powershell 'docker version'
-                        }
+                        echo 'Docker is available via DinD.'
                     } else {
                         env.DOCKER_AVAILABLE = 'false'
-                        echo 'Docker is NOT available on this agent. Docker-related stages will be skipped.'
+                        echo 'Docker is NOT available. Docker stages will be skipped.'
                     }
                 }
             }
@@ -59,108 +48,65 @@
         stage('Docker Hub Login') {
             when {
                 allOf {
-                    expression { return env.DOCKER_AVAILABLE == 'true' }
-                    expression { return params.PUBLISH_IMAGES }
+                    expression { env.DOCKER_AVAILABLE == 'true' }
+                    expression { params.PUBLISH_IMAGES }
                 }
             }
             steps {
                 script {
                     try {
                         withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
-                            if (isUnix()) {
-                                sh 'echo "$DH_PSW" | docker login -u "$DH_USER" --password-stdin'
-                            } else {
-                                powershell 'echo $env:DH_PSW | docker login -u $env:DH_USER --password-stdin'
-                            }
+                            sh 'echo "$DH_PSW" | docker login -u "$DH_USER" --password-stdin'
                         }
                     } catch (err) {
-                        echo "Docker Hub credentials with ID 'docker-hub-credentials' are missing or misconfigured."
-                        error "Configure a Jenkins Username/Password credential named 'docker-hub-credentials' to proceed."
+                        echo "Docker Hub credentials missing or misconfigured."
+                        error "Configure Jenkins credentials 'docker-hub-credentials'."
                     }
                 }
             }
         }
 
         stage('Build Docker Image') {
-            when {
-                expression { return env.DOCKER_AVAILABLE == 'true' }
-            }
+            when { expression { env.DOCKER_AVAILABLE == 'true' } }
             steps {
-                script {
-                    if (isUnix()) {
-                        sh """
-                          docker build -f backend/Dockerfile -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
-                          docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
-                        """
-                    } else {
-                        powershell """
-                          docker build -f backend/Dockerfile -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
-                          docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
-                        """
-                    }
-                }
+                sh """
+                    docker build -f backend/Dockerfile -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
+                    docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
+                """
             }
         }
         
         stage('Push to Docker Hub') {
             when {
                 allOf {
-                    expression { return env.DOCKER_AVAILABLE == 'true' }
-                    expression { return params.PUBLISH_IMAGES }
+                    expression { env.DOCKER_AVAILABLE == 'true' }
+                    expression { params.PUBLISH_IMAGES }
                 }
             }
             steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
-                        if (isUnix()) {
-                            sh """
-                              docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
-                              docker push ${IMAGE_NAME}:latest
-                            """
-                        } else {
-                            powershell """
-                              docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
-                              docker push ${IMAGE_NAME}:latest
-                            """
-                        }
-                    }
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
+                    sh """
+                        docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
+                        docker push ${IMAGE_NAME}:latest
+                    """
                 }
             }
         }
         
         stage('Deploy') {
-            when {
-                expression { return env.DOCKER_AVAILABLE == 'true' }
-            }
+            when { expression { env.DOCKER_AVAILABLE == 'true' } }
             steps {
-                script {
-                    if (isUnix()) {
-                        sh 'docker compose down || docker-compose down || true'
-                        sh 'docker compose up -d --build || docker-compose up -d --build'
-                    } else {
-                        powershell 'docker compose down; if ($LASTEXITCODE -ne 0) { docker-compose down }'
-                        powershell 'docker compose up -d --build; if ($LASTEXITCODE -ne 0) { docker-compose up -d --build }'
-                    }
-                }
+                sh """
+                    docker compose -H tcp://docker-dind:2375 down || true
+                    docker compose -H tcp://docker-dind:2375 up -d --build
+                """
             }
         }
     }
     
     post {
-        always {
-            script {
-                if (env.WORKSPACE?.trim()) {
-                    deleteDir() // ensures workspace cleanup
-                } else {
-                    echo 'No workspace context; skipping deleteDir.'
-                }
-            }
-        }
-        success {
-            echo 'Pipeline completed successfully!'
-        }
-        failure {
-            echo 'Pipeline failed!'
-        }
+        always { deleteDir() }
+        success { echo 'Pipeline completed successfully!' }
+        failure { echo 'Pipeline failed!' }
     }
 }

@@ -1,6 +1,16 @@
-version: "3.9"
+version: '3.9'
 
 services:
+  docker-dind:
+    image: docker:20.10-dind
+    container_name: docker-dind
+    privileged: true                 # Required for DinD
+    ports:
+      - "2375:2375"                  # Docker TCP API
+    networks:
+      - app-network
+    restart: unless-stopped
+
   app:
     build:
       context: .
@@ -28,18 +38,6 @@ services:
       - app-network
     restart: unless-stopped
 
-  docker:
-    image: docker:20.10-dind
-    container_name: docker-dind
-    privileged: true
-    environment:
-      - DOCKER_TLS_CERTDIR=
-    ports:
-      - "2375:2375"  # Jenkins will connect here
-    networks:
-      - app-network
-    restart: unless-stopped
-
   jenkins:
     image: jenkins/jenkins:lts
     container_name: socila-media-jenkins-1
@@ -47,14 +45,16 @@ services:
     ports:
       - "9090:8080"
       - "50000:50000"
-    environment:
-      DOCKER_HOST: tcp://docker:2375
-    depends_on:
-      - docker
-    networks:
-      - app-network
     volumes:
       - jenkins_home:/var/jenkins_home
+    environment:
+      - DOCKER_HOST=tcp://docker-dind:2375   # Jenkins talks to DinD
+    depends_on:
+      - docker-dind
+      - mongo
+      - app
+    networks:
+      - app-network
     restart: unless-stopped
 
 networks:
