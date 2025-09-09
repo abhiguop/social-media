@@ -1,50 +1,53 @@
 pipeline {
     agent any
-    
+
     environment {
         IMAGE_NAME = 'abhigyop/social-media-backend'
-        DOCKER_HOST = 'tcp://docker-dind:2375'   // Use DinD
+        // Point Docker client to DinD container
+        DOCKER_HOST = 'tcp://docker-dind:2375'
     }
-    
+
     parameters {
-        booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'Push Docker images to Docker Hub')
+        booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'If true, logs into Docker Hub and pushes built images.')
     }
-    
+
     options {
         skipDefaultCheckout(true)
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    doGenerateSubmoduleConfigurations: false,
-                    extensions: [],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/abhiguop/social-media',
-                        // credentialsId: 'github-credentials'
-                    ]]
-                ])
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: '*/main']],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [],
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/abhiguop/social-media'
+                        ]]
+                    ])
+                }
             }
         }
-        
+
         stage('Check Docker') {
             steps {
                 script {
                     def status = sh(script: 'docker version', returnStatus: true)
                     if (status == 0) {
-                        env.DOCKER_AVAILABLE = 'true'
                         echo 'Docker is available via DinD.'
+                        env.DOCKER_AVAILABLE = 'true'
+                        sh 'docker version'
                     } else {
-                        env.DOCKER_AVAILABLE = 'false'
                         echo 'Docker is NOT available. Docker stages will be skipped.'
+                        env.DOCKER_AVAILABLE = 'false'
                     }
                 }
             }
         }
-        
+
         stage('Docker Hub Login') {
             when {
                 allOf {
@@ -54,20 +57,17 @@ pipeline {
             }
             steps {
                 script {
-                    try {
-                        withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
-                            sh 'echo "$DH_PSW" | docker login -u "$DH_USER" --password-stdin'
-                        }
-                    } catch (err) {
-                        echo "Docker Hub credentials missing or misconfigured."
-                        error "Configure Jenkins credentials 'docker-hub-credentials'."
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
+                        sh 'echo "$DH_PSW" | docker login -u "$DH_USER" --password-stdin'
                     }
                 }
             }
         }
 
         stage('Build Docker Image') {
-            when { expression { env.DOCKER_AVAILABLE == 'true' } }
+            when {
+                expression { env.DOCKER_AVAILABLE == 'true' }
+            }
             steps {
                 sh """
                     docker build -f backend/Dockerfile -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
@@ -75,7 +75,7 @@ pipeline {
                 """
             }
         }
-        
+
         stage('Push to Docker Hub') {
             when {
                 allOf {
@@ -92,21 +92,33 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Deploy') {
-            when { expression { env.DOCKER_AVAILABLE == 'true' } }
+            when {
+                expression { env.DOCKER_AVAILABLE == 'true' }
+            }
             steps {
-                sh """
-                    docker compose -H tcp://docker-dind:2375 down || true
-                    docker compose -H tcp://docker-dind:2375 up -d --build
-                """
+                sh 'docker compose down || true'
+                sh 'docker compose up -d --build || true'
             }
         }
     }
-    
+
     post {
-        always { deleteDir() }
-        success { echo 'Pipeline completed successfully!' }
-        failure { echo 'Pipeline failed!' }
+        always {
+            script {
+                if (env.WORKSPACE?.trim()) {
+                    deleteDir()
+                } else {
+                    echo 'No workspace context; skipping deleteDir.'
+                }
+            }
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
     }
 }

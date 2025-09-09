@@ -4,25 +4,29 @@ services:
   docker-dind:
     image: docker:20.10-dind
     container_name: docker-dind
-    privileged: true                 # Required for DinD
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
     ports:
-      - "2375:2375"                  # Docker TCP API
-    networks:
-      - app-network
+      - "2375:2375" # Expose Docker daemon without TLS (for simplicity on local)
+    volumes:
+      - dind-data:/var/lib/docker
     restart: unless-stopped
 
-  app:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: socila-media-jenkins
+    user: root
     ports:
-      - "4001:4000"
-    env_file:
-      - .env
+      - "9090:8080"
+      - "50000:50000"
     environment:
-      - NODE_ENV=production
+      - DOCKER_HOST=tcp://docker-dind:2375
     depends_on:
-      - mongo
+      - docker-dind
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /usr/bin/docker:/usr/bin/docker # Mount docker binary
     networks:
       - app-network
     restart: unless-stopped
@@ -38,21 +42,19 @@ services:
       - app-network
     restart: unless-stopped
 
-  jenkins:
-    image: jenkins/jenkins:lts
-    container_name: socila-media-jenkins-1
-    user: root
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: socila-media-app
     ports:
-      - "9090:8080"
-      - "50000:50000"
-    volumes:
-      - jenkins_home:/var/jenkins_home
+      - "4001:4000"
+    env_file:
+      - .env
     environment:
-      - DOCKER_HOST=tcp://docker-dind:2375   # Jenkins talks to DinD
+      - NODE_ENV=production
     depends_on:
-      - docker-dind
       - mongo
-      - app
     networks:
       - app-network
     restart: unless-stopped
@@ -62,5 +64,6 @@ networks:
     driver: bridge
 
 volumes:
-  mongodb_data:
   jenkins_home:
+  mongodb_data:
+  dind-data:
