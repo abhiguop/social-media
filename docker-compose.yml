@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   app:
     build:
@@ -26,18 +28,33 @@ services:
       - app-network
     restart: unless-stopped
 
+  docker:
+    image: docker:20.10-dind
+    container_name: docker-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    ports:
+      - "2375:2375"  # Jenkins will connect here
+    networks:
+      - app-network
+    restart: unless-stopped
+
   jenkins:
     image: jenkins/jenkins:lts
+    container_name: socila-media-jenkins-1
     user: root
     ports:
       - "9090:8080"
       - "50000:50000"
-    volumes:
-      - jenkins_home:/var/jenkins_home
-      # Docker socket mount works on Linux hosts. On Windows/Mac, consider alternative setups.
-      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+    depends_on:
+      - docker
     networks:
       - app-network
+    volumes:
+      - jenkins_home:/var/jenkins_home
     restart: unless-stopped
 
 networks:
