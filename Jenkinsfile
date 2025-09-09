@@ -1,9 +1,12 @@
-pipeline {
+  pipeline {
     agent any
     
     environment {
-        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
         IMAGE_NAME = 'abhigyop/social-media-backend'
+    }
+    
+    parameters {
+        booleanParam(name: 'PUBLISH_IMAGES', defaultValue: false, description: 'If true, logs into Docker Hub and pushes built images. Leave false if credentials are not configured yet.')
     }
     
     stages {
@@ -37,12 +40,22 @@ pipeline {
         }
         
         stage('Docker Hub Login') {
+            when {
+                expression { return params.PUBLISH_IMAGES }
+            }
             steps {
                 script {
-                    if (isUnix()) {
-                        sh 'echo "$DOCKER_HUB_CREDENTIALS_PSW" | docker login -u "$DOCKER_HUB_CREDENTIALS_USR" --password-stdin'
-                    } else {
-                        powershell 'echo $env:DOCKER_HUB_CREDENTIALS_PSW | docker login -u $env:DOCKER_HUB_CREDENTIALS_USR --password-stdin'
+                    try {
+                        withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
+                            if (isUnix()) {
+                                sh 'echo "$DH_PSW" | docker login -u "$DH_USER" --password-stdin'
+                            } else {
+                                powershell 'echo $env:DH_PSW | docker login -u $env:DH_USER --password-stdin'
+                            }
+                        }
+                    } catch (err) {
+                        echo "Docker Hub credentials with ID 'docker-hub-credentials' are missing or misconfigured."
+                        error "Configure a Jenkins Username/Password credential named 'docker-hub-credentials' to proceed."
                     }
                 }
             }
@@ -67,18 +80,23 @@ pipeline {
         }
         
         stage('Push to Docker Hub') {
+            when {
+                expression { return params.PUBLISH_IMAGES }
+            }
             steps {
                 script {
-                    if (isUnix()) {
-                        sh """
-                          docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
-                          docker push ${IMAGE_NAME}:latest
-                        """
-                    } else {
-                        powershell """
-                          docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
-                          docker push ${IMAGE_NAME}:latest
-                        """
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PSW')]) {
+                        if (isUnix()) {
+                            sh """
+                              docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
+                              docker push ${IMAGE_NAME}:latest
+                            """
+                        } else {
+                            powershell """
+                              docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
+                              docker push ${IMAGE_NAME}:latest
+                            """
+                        }
                     }
                 }
             }
@@ -101,7 +119,13 @@ pipeline {
     
     post {
         always {
-            deleteDir() // ensures workspace cleanup
+            script {
+                if (env.WORKSPACE?.trim()) {
+                    deleteDir() // ensures workspace cleanup
+                } else {
+                    echo 'No workspace context; skipping deleteDir.'
+                }
+            }
         }
         success {
             echo 'Pipeline completed successfully!'
