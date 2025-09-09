@@ -1,9 +1,9 @@
 pipeline {
-    agent any
+    agent { label 'docker' }
     
     environment {
         DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
-        IMAGE_NAME = 'your-dockerhub-username/social-media-backend'
+        IMAGE_NAME = 'abhigyop/social-media-backend'
     }
     
     stages {
@@ -24,6 +24,20 @@ pipeline {
             }
         }
         
+        stage('Verify Docker') {
+            steps {
+                sh 'docker version'
+            }
+        }
+        
+        stage('Docker Hub Login') {
+     steps {
+    sh '''
+      echo "$DOCKER_HUB_CREDENTIALS_PSW" | docker login -u "$DOCKER_HUB_CREDENTIALS_USR" --password-stdin
+    '''
+  }
+}
+
         stage('Build Docker Image') {
             steps {
                 script {

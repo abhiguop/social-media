@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   app:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "4000:4000"
+      - "4001:4000"
     env_file:
       - .env
     environment:
@@ -30,7 +28,6 @@ services:
 
   jenkins:
     image: jenkins/jenkins:lts
-    container_name: jenkins
     user: root
     ports:
       - "9090:8080"
