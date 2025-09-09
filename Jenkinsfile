@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'docker' }
+    agent any
     
     environment {
         DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
@@ -26,22 +26,42 @@ pipeline {
         
         stage('Verify Docker') {
             steps {
-                sh 'docker version'
+                script {
+                    if (isUnix()) {
+                        sh 'docker version'
+                    } else {
+                        powershell 'docker version'
+                    }
+                }
             }
         }
         
         stage('Docker Hub Login') {
-     steps {
-    sh '''
-      echo "$DOCKER_HUB_CREDENTIALS_PSW" | docker login -u "$DOCKER_HUB_CREDENTIALS_USR" --password-stdin
-    '''
-  }
-}
+            steps {
+                script {
+                    if (isUnix()) {
+                        sh 'echo "$DOCKER_HUB_CREDENTIALS_PSW" | docker login -u "$DOCKER_HUB_CREDENTIALS_USR" --password-stdin'
+                    } else {
+                        powershell 'echo $env:DOCKER_HUB_CREDENTIALS_PSW | docker login -u $env:DOCKER_HUB_CREDENTIALS_USR --password-stdin'
+                    }
+                }
+            }
+        }
 
         stage('Build Docker Image') {
             steps {
                 script {
-                    appImage = docker.build("${IMAGE_NAME}:${env.BUILD_NUMBER}", "-f backend/Dockerfile .")
+                    if (isUnix()) {
+                        sh """
+                          docker build -f backend/Dockerfile -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
+                          docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
+                        """
+                    } else {
+                        powershell """
+                          docker build -f backend/Dockerfile -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
+                          docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${IMAGE_NAME}:latest
+                        """
+                    }
                 }
             }
         }
@@ -49,9 +69,16 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-credentials') {
-                        appImage.push()
-                        appImage.push('latest')
+                    if (isUnix()) {
+                        sh """
+                          docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
+                          docker push ${IMAGE_NAME}:latest
+                        """
+                    } else {
+                        powershell """
+                          docker push ${IMAGE_NAME}:${env.BUILD_NUMBER}
+                          docker push ${IMAGE_NAME}:latest
+                        """
                     }
                 }
             }
@@ -59,8 +86,15 @@ pipeline {
         
         stage('Deploy') {
             steps {
-                sh 'docker compose down || docker-compose down || true'
-                sh 'docker compose up -d --build || docker-compose up -d --build'
+                script {
+                    if (isUnix()) {
+                        sh 'docker compose down || docker-compose down || true'
+                        sh 'docker compose up -d --build || docker-compose up -d --build'
+                    } else {
+                        powershell 'docker compose down; if ($LASTEXITCODE -ne 0) { docker-compose down }'
+                        powershell 'docker compose up -d --build; if ($LASTEXITCODE -ne 0) { docker-compose up -d --build }'
+                    }
+                }
             }
         }
     }
